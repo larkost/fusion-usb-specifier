@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+
+'''Given a iOS/tvOS device serial number find the `usb.autoConnect` string for VMWare Fusion'''
+
+import argparse, collections, plistlib, subprocess, sys, tempfile, traceback
+
+DEVICE_TYPES = ('iPhone', 'iPad', 'AppleTV')
+Device = collections.namedtuple('Device', ('type', 'serial', 'product_id', 'vendor_id', 'location'))
+
+class ProcessException(Exception):
+	'''Internal exception type to help in reporting problems'''
+
+def getDevices():
+	'''Return a list of `Device`s of types DEVICE_TYPES currently visible on this computer'''
+	
+	# - get ioreg output
+	output = tempfile.NamedTemporaryFile()
+	ioreg  = subprocess.Popen(['/usr/sbin/ioreg', '-alxp', 'IOUSB'], stdout=output, stderr=subprocess.STDOUT)
+	if ioreg.wait() != 0:
+		raise ProcessException('Error getting `ioreg` output (%d):\not %s' % output)
+	
+	# - parse the xml-plist
+	try:
+		data = plistlib.readPlist(output.name)
+	except Exception as e:
+		raise ProcessException('Error parsing `ioreg` output: %s\n%s' % (str(e), output))
+	
+	# - find the devices
+	devices = []
+	def getDevices_inner(data):
+		if isinstance(data, dict):
+			if isinstance(data.get('IORegistryEntryChildren'), list):
+				for child in data.get('IORegistryEntryChildren'):
+					getDevices_inner(child)
+			elif data.get('IOObjectClass') in DEVICE_TYPES:
+				# - translate location in VMWare format
+				location = str(data.get('IORegistryEntryLocation'))
+				# swap the first two characters (because that is how VMWare wants it
+				location = location[1:2] + location[:1] + location[2:]
+				# truncate it and insert slashes
+				location = '/'.join(list(location.rstrip('0')))
+				
+				devices.append(Device(
+					data['IORegistryEntryName'], # type: e.g. iPhone
+					data['USB Serial Number'],   # serial number
+					data['idProduct'],           # USB product id
+					data['idVendor'],            # USB vendor id
+					location                     # VMWare formatted USB path
+				))
+	
+	getDevices_inner(data)
+	
+	# - return what we have
+	return devices
+
+if __name__ == '__main__':
+	# - parse input
+	parser = argparse.ArgumentParser(description='Get `usb.autoConnect` string for a iOS/tvOS device')
+	parser.add_argument('serial_number', metavar='SERIAL', nargs='?', type=str, help='The serial number of the device you are looking for')
+	args = parser.parse_args()
+	
+	# - get the list of devices
+	candidates = None
+	try:
+		candidates = getDevices()
+	except ProcessException as e:
+		sys.exit(str(e))
+	except Exception as e:
+		sys.exit('Unexpected error: %s\n%s' % (str(e), traceback.format_exc()))
+	
+	if args.serial_number:
+		# - look for the specified device
+		device = None
+		for candidate in candidates:
+			if candidate.serial.lower() == args.serial_number.lower():
+				device = candidate
+				break
+		else:
+			sys.exit('Unable to find a device with the serial number: %s' % args.serial_number)
+	
+		# - print the output
+		print('path:%(location)s vid:%(vendor_id)s pid:%(product_id)s' % device._asdict())
+	
+	else:
+		# - print out all of the devices found
+		if not candidates:
+			print('No devices were found')
+		else:
+			for device in candidates:
+				print('%(type)s Serial: %(serial)s\n\tpath:%(location)s vid:%(vendor_id)s pid:%(product_id)s' % device._asdict())
+			
