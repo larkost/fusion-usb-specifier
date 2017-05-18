@@ -1,6 +1,11 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 '''Given a iOS/tvOS device serial number find the `usb.autoConnect` string for VMWare Fusion'''
+
+__author__  = 'Karl Kuehn'
+__license__ = 'Apache 2.0'
+__version__ = '0.9'
 
 import argparse, collections, plistlib, subprocess, sys, tempfile, traceback
 
@@ -41,13 +46,12 @@ def getDevices():
 				location = '/'.join(list(location.rstrip('0')))
 				
 				devices.append(Device(
-					data['IORegistryEntryName'], # type: e.g. iPhone
-					data['USB Serial Number'],   # serial number
-					data['idProduct'],           # USB product id
-					data['idVendor'],            # USB vendor id
-					location                     # VMWare formatted USB path
+					data['IORegistryEntryName'],     # type: e.g. iPhone
+					data['USB Serial Number'],       # serial number
+					'%04x' % int(data['idProduct']), # USB product id
+					'%04x' % int(data['idVendor']),  # USB vendor id
+					location                         # VMWare formatted USB path
 				))
-	
 	getDevices_inner(data)
 	
 	# - return what we have
@@ -55,8 +59,9 @@ def getDevices():
 
 if __name__ == '__main__':
 	# - parse input
-	parser = argparse.ArgumentParser(description='Get `usb.autoConnect` string for a iOS/tvOS device')
+	parser = argparse.ArgumentParser(description='Get `usb.autoConnect` string for a iOS/tvOS device', epilog='If called with no arguments the list of devices found on the system are shown.')
 	parser.add_argument('serial_number', metavar='SERIAL', nargs='?', type=str, help='The serial number of the device you are looking for')
+	parser.add_argument('--version',     action='version', version='%(prog)s ' + str(__version__))
 	args = parser.parse_args()
 	
 	# - get the list of devices
